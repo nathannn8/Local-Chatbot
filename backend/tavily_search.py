@@ -10,8 +10,8 @@ mcp = FastMCP("tavily-server")
 TAVILY_API_KEY = os.getenv("TAVILY_API_KEY")
 
 @mcp.tool()
-def tavily_search(query: str):
-    """Search the web using Tavily"""
+def web_search(query: str):
+    """Search the web using Tavily if the question is not about documents"""
     response = requests.post(
         "https://api.tavily.com/search",
         json={

@@ -9,8 +9,8 @@ db_client = chromadb.PersistentClient(path="./chromadb")
 collection = db_client.get_or_create_collection(name="documents")
 
 @mcp.tool()
-def pdf_search(query: str):
-    """Search the PDF knowledge base"""
+def document_search(query: str):
+    """Search the document knowledge base"""
     response = ollama.embeddings(model="nomic-embed-text", prompt=query)
     embedding = response["embedding"]
     
