@@ -45,9 +45,10 @@ def upload_pdf(file: UploadFile = File(...)):
     return {"message": f"Stored {len(chunks)} chunks from {file.filename}"}
 
 async def run_with_mcp(query: str):
-    rag_params = StdioServerParameters(command="python", args=["rag_server.py"])
-    tavily_params = StdioServerParameters(command="python", args=["tavily_search.py"])
-    
+    # fixed: use "py" for Windows, correct filenames
+    rag_params = StdioServerParameters(command="py", args=["rag_server.py"])
+    tavily_params = StdioServerParameters(command="py", args=["tavily_search.py"])
+
     async with stdio_client(rag_params) as (r1, w1):
         async with ClientSession(r1, w1) as rag_session:
             await rag_session.initialize()
@@ -64,26 +65,34 @@ async def run_with_mcp(query: str):
                             "parameters": t.inputSchema
                         }
                     } for t in rag_tools.tools + tavily_tools.tools]
+
+                    # fixed: system prompt matches actual tool names
                     messages = [
-                        {"role": "system", "content": "You are a helpful assistant. Use pdf_search for document questions and tavily_search for web questions."},
+                        {"role": "system", "content": "You are a helpful assistant. You have two tools: use document_search to answer questions about uploaded documents/PDFs, and use web_search to find information on the web. Always use a tool to answer — never answer from memory."},
                         {"role": "user", "content": query}
                     ]
+
                     response = ollama.chat(
                         model="llama3.2:1b",
                         messages=messages,
                         tools=all_tools
                     )
+
                     if response.message.tool_calls:
                         for tool_call in response.message.tool_calls:
                             tool_name = tool_call.function.name
                             tool_args = dict(tool_call.function.arguments)
-                            if tool_name == "pdf_search":
+
+                            # fixed: route by actual tool names
+                            if tool_name == "document_search":
                                 result = await rag_session.call_tool(tool_name, tool_args)
                             else:
                                 result = await tavily_session.call_tool(tool_name, tool_args)
+
                             tool_data = result.content[0].text
                             messages.append({"role": "assistant", "content": str(response.message)})
                             messages.append({"role": "tool", "content": tool_data})
+
                         final = ollama.chat(model="llama3.2:1b", messages=messages)
                         return final.message.content
                     else:
