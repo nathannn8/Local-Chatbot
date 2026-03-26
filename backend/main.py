@@ -46,7 +46,7 @@ def upload_pdf(file: UploadFile = File(...)):
 
 async def run_with_mcp(query: str):
     rag_params = StdioServerParameters(command="python", args=["rag_server.py"])
-    tavily_params = StdioServerParameters(command="python", args=["tavily_server.py"])
+    tavily_params = StdioServerParameters(command="python", args=["tavily_search.py"])
     
     async with stdio_client(rag_params) as (r1, w1):
         async with ClientSession(r1, w1) as rag_session:
