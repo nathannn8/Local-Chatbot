@@ -4,11 +4,15 @@ from fastapi import UploadFile, File
 import shutil
 import os
 from docling.document_converter import DocumentConverter
+from openai import OpenAI
 import ollama
 import chromadb
 import asyncio
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
+from dotenv import load_dotenv
+
+load_dotenv()
 
 app = FastAPI()
 
@@ -22,6 +26,13 @@ app.add_middleware(
 
 db_client = chromadb.PersistentClient(path="./chromadb")
 collection = db_client.get_or_create_collection(name="documents")
+
+router_client = OpenAI(
+    base_url="https://openrouter.ai/api/v1",
+    api_key=os.getenv("OPENROUTER_API_KEY")
+)
+
+MODEL = "meta-llama/llama-3.1-8b-instruct:free"
 
 @app.post("/upload")
 def upload_pdf(file: UploadFile = File(...)):
@@ -45,7 +56,6 @@ def upload_pdf(file: UploadFile = File(...)):
     return {"message": f"Stored {len(chunks)} chunks from {file.filename}"}
 
 async def run_with_mcp(query: str):
-    # fixed: use "py" for Windows, correct filenames
     rag_params = StdioServerParameters(command="py", args=["rag_server.py"])
     tavily_params = StdioServerParameters(command="py", args=["tavily_search.py"])
 
@@ -66,37 +76,38 @@ async def run_with_mcp(query: str):
                         }
                     } for t in rag_tools.tools + tavily_tools.tools]
 
-                    # fixed: system prompt matches actual tool names
                     messages = [
-                        {"role": "system", "content": "You are a helpful assistant. You have two tools: use document_search to answer questions about uploaded documents/PDFs, and use web_search to find information on the web. Always use a tool to answer — never answer from memory."},
+                        {"role": "system", "content": "You are a helpful assistant. Use document_search for questions about uploaded documents and web_search for web questions. Always use a tool."},
                         {"role": "user", "content": query}
                     ]
 
-                    response = ollama.chat(
-                        model="llama3.2:1b",
+                    response = router_client.chat.completions.create(
+                        model=MODEL,
                         messages=messages,
                         tools=all_tools
                     )
 
-                    if response.message.tool_calls:
-                        for tool_call in response.message.tool_calls:
+                    if response.choices[0].message.tool_calls:
+                        for tool_call in response.choices[0].message.tool_calls:
                             tool_name = tool_call.function.name
-                            tool_args = dict(tool_call.function.arguments)
+                            tool_args = eval(tool_call.function.arguments)
 
-                            # fixed: route by actual tool names
                             if tool_name == "document_search":
                                 result = await rag_session.call_tool(tool_name, tool_args)
                             else:
                                 result = await tavily_session.call_tool(tool_name, tool_args)
 
                             tool_data = result.content[0].text
-                            messages.append({"role": "assistant", "content": str(response.message)})
-                            messages.append({"role": "tool", "content": tool_data})
+                            messages.append({"role": "assistant", "content": None, "tool_calls": [tool_call]})
+                            messages.append({"role": "tool", "content": tool_data, "tool_call_id": tool_call.id})
 
-                        final = ollama.chat(model="llama3.2:1b", messages=messages)
-                        return final.message.content
+                        final = router_client.chat.completions.create(
+                            model=MODEL,
+                            messages=messages
+                        )
+                        return final.choices[0].message.content
                     else:
-                        return response.message.content
+                        return response.choices[0].message.content
 
 @app.post("/chat")
 def chat(data: dict):

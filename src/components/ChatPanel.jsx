@@ -24,7 +24,9 @@ export default function ChatPanel() {
     : 'U';
 
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+    setTimeout(() => {
+      bottomRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
+    }, 100);
   }, [messages, isTyping]);
 
   const handleSend = async () => {
@@ -106,25 +108,23 @@ export default function ChatPanel() {
         )}
 
         {messages.map((msg) => (
-          <div key={msg.id}>
-            <div className={`message-row ${msg.role === 'user' ? 'user' : 'ai'}`}>
-              <div className="msg-avatar">
-                {msg.role === 'user' ? initials : <Bot size={14} />}
+          <div key={msg.id} className={`message-row ${msg.role === 'user' ? 'user' : 'ai'}`}>
+            <div className="msg-avatar">
+              {msg.role === 'user' ? initials : <Bot size={14} />}
+            </div>
+            <div>
+              <div className="msg-bubble">
+                {msg.role === 'ai' ? (
+                  <div className="md-content">
+                    <ReactMarkdown>
+                      {String(msg.content || '')}
+                    </ReactMarkdown>
+                  </div>
+                ) : (
+                  msg.content
+                )}
               </div>
-              <div>
-                <div className="msg-bubble">
-                  {msg.role === 'ai' ? (
-                    <div className="md-content">
-                      <ReactMarkdown>
-                        {String(msg.content || '')}
-                      </ReactMarkdown>
-                    </div>
-                  ) : (
-                    msg.content
-                  )}
-                </div>
-                <div className="msg-time">{msg.time}</div>
-              </div>
+              <div className="msg-time">{msg.time}</div>
             </div>
           </div>
         ))}
