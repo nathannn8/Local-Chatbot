@@ -1,28 +1,23 @@
-from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi import UploadFile, File
-import shutil
 import os
+import json
+import asyncio
+import shutil
+from typing import List, Dict
+from contextlib import asynccontextmanager
+
+from fastapi import FastAPI, UploadFile, File, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
+from dotenv import load_dotenv
+
 from docling.document_converter import DocumentConverter
 from openai import OpenAI
 import ollama
 import chromadb
-import asyncio
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
-from dotenv import load_dotenv
 
 load_dotenv()
-
-app = FastAPI()
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["http://localhost:5173"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
 
 db_client = chromadb.PersistentClient(path="./chromadb")
 collection = db_client.get_or_create_collection(name="documents")
@@ -32,85 +27,150 @@ router_client = OpenAI(
     api_key=os.getenv("OPENROUTER_API_KEY")
 )
 
-MODEL = "meta-llama/llama-3.1-8b-instruct:free"
+MODEL = "openrouter/free"
+
+class MCPManager:
+    def __init__(self):
+        self.sessions = {}
+        self.transports = {}
+        self.configs = {
+            "rag": StdioServerParameters(command="py", args=["rag_server.py"]),
+            "tavily": StdioServerParameters(command="py", args=["tavily_search.py"])
+        }
+
+    async def initialize(self):
+        for key, params in self.configs.items():
+            transport = stdio_client(params)
+            read, write = await transport.__aenter__()
+            self.transports[key] = transport
+            session = ClientSession(read, write)
+            await session.__aenter__()
+            await session.initialize()
+            self.sessions[key] = session
+        print("MCP Servers initialized and ready.")
+
+    async def get_tools_metadata(self) -> List[Dict]:
+        all_tools = []
+        for name, session in self.sessions.items():
+            tool_list = await session.list_tools()
+            for t in tool_list.tools:
+                all_tools.append({
+                    "type": "function",
+                    "function": {
+                        "name": t.name,
+                        "description": t.description,
+                        "parameters": t.inputSchema
+                    }
+                })
+        return all_tools
+
+    async def call_tool(self, tool_name: str, arguments: dict):
+        if tool_name == "document_search":
+            return await self.sessions["rag"].call_tool(tool_name, arguments)
+        elif tool_name == "web_search":
+            return await self.sessions["tavily"].call_tool(tool_name, arguments)
+        raise ValueError(f"Tool {tool_name} not found")
+
+mcp_manager = MCPManager()
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    await mcp_manager.initialize()
+    yield
+
+app = FastAPI(lifespan=lifespan)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:5173"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+class ChatRequest(BaseModel):
+    message: str
 
 @app.post("/upload")
-def upload_pdf(file: UploadFile = File(...)):
+async def upload_pdf(file: UploadFile = File(...)):
     temp_path = f"temp_{file.filename}"
-    with open(temp_path, "wb") as f:
-        shutil.copyfileobj(file.file, f)
-    converter = DocumentConverter()
-    result = converter.convert(temp_path)
-    text = result.document.export_to_markdown()
-    chunks = text.split('\n\n')
-    chunks = [c.strip() for c in chunks if len(c.strip()) > 100]
-    for i, chunk in enumerate(chunks):
-        embed_response = ollama.embeddings(model="nomic-embed-text", prompt=chunk)
-        embedding = embed_response["embedding"]
-        collection.add(
-            ids=[f"{file.filename}_chunk_{i}"],
-            embeddings=[embedding],
-            documents=[chunk]
-        )
-    os.remove(temp_path)
-    return {"message": f"Stored {len(chunks)} chunks from {file.filename}"}
-
-async def run_with_mcp(query: str):
-    rag_params = StdioServerParameters(command="py", args=["rag_server.py"])
-    tavily_params = StdioServerParameters(command="py", args=["tavily_search.py"])
-
-    async with stdio_client(rag_params) as (r1, w1):
-        async with ClientSession(r1, w1) as rag_session:
-            await rag_session.initialize()
-            async with stdio_client(tavily_params) as (r2, w2):
-                async with ClientSession(r2, w2) as tavily_session:
-                    await tavily_session.initialize()
-                    rag_tools = await rag_session.list_tools()
-                    tavily_tools = await tavily_session.list_tools()
-                    all_tools = [{
-                        "type": "function",
-                        "function": {
-                            "name": t.name,
-                            "description": t.description,
-                            "parameters": t.inputSchema
-                        }
-                    } for t in rag_tools.tools + tavily_tools.tools]
-
-                    messages = [
-                        {"role": "system", "content": "You are a helpful assistant. Use document_search for questions about uploaded documents and web_search for web questions. Always use a tool."},
-                        {"role": "user", "content": query}
-                    ]
-
-                    response = router_client.chat.completions.create(
-                        model=MODEL,
-                        messages=messages,
-                        tools=all_tools
-                    )
-
-                    if response.choices[0].message.tool_calls:
-                        for tool_call in response.choices[0].message.tool_calls:
-                            tool_name = tool_call.function.name
-                            tool_args = eval(tool_call.function.arguments)
-
-                            if tool_name == "document_search":
-                                result = await rag_session.call_tool(tool_name, tool_args)
-                            else:
-                                result = await tavily_session.call_tool(tool_name, tool_args)
-
-                            tool_data = result.content[0].text
-                            messages.append({"role": "assistant", "content": None, "tool_calls": [tool_call]})
-                            messages.append({"role": "tool", "content": tool_data, "tool_call_id": tool_call.id})
-
-                        final = router_client.chat.completions.create(
-                            model=MODEL,
-                            messages=messages
-                        )
-                        return final.choices[0].message.content
-                    else:
-                        return response.choices[0].message.content
+    try:
+        with open(temp_path, "wb") as f:
+            shutil.copyfileobj(file.file, f)
+        converter = DocumentConverter()
+        result = converter.convert(temp_path)
+        text = result.document.export_to_markdown()
+        chunks = [c.strip() for c in text.split('\n\n') if len(c.strip()) > 100]
+        for i, chunk in enumerate(chunks):
+            embed_res = ollama.embeddings(model="nomic-embed-text", prompt=chunk)
+            collection.add(
+                ids=[f"{file.filename}_{i}"],
+                embeddings=[embed_res["embedding"]],
+                documents=[chunk]
+            )
+        return {"status": "success", "chunks_stored": len(chunks)}
+    finally:
+        if os.path.exists(temp_path):
+            os.remove(temp_path)
 
 @app.post("/chat")
-def chat(data: dict):
-    query = data["message"]
-    reply = asyncio.run(run_with_mcp(query))
-    return {"reply": reply}
+async def chat(request: ChatRequest):
+    tools = await mcp_manager.get_tools_metadata()
+    messages = [
+        {
+            "role": "system",
+            "content": (
+                "You are an AI with access to a document RAG server and a web search tool. "
+                "1. Always use document_search if the user asks about their files or uploaded documents. "
+                "2. Use web_search for current events or general knowledge. "
+                "3. If one tool fails to provide an answer, try the other."
+            )
+        },
+        {"role": "user", "content": request.message}
+    ]
+
+    response = router_client.chat.completions.create(
+        model=MODEL,
+        messages=messages,
+        tools=tools,
+        tool_choice="auto"
+    )
+
+    response_message = response.choices[0].message
+
+    if response_message.tool_calls:
+        messages.append(response_message)
+        for tool_call in response_message.tool_calls:
+            try:
+                tool_args = json.loads(tool_call.function.arguments)
+                tool_result = await mcp_manager.call_tool(tool_call.function.name, tool_args)
+                result_text = tool_result.content[0].text
+                messages.append({
+                    "role": "tool",
+                    "tool_call_id": tool_call.id,
+                    "name": tool_call.function.name,
+                    "content": result_text
+                })
+            except Exception as e:
+                messages.append({
+                    "role": "tool",
+                    "tool_call_id": tool_call.id,
+                    "name": tool_call.function.name,
+                    "content": f"Error executing tool: {str(e)}"
+                })
+
+        final_response = router_client.chat.completions.create(
+            model=MODEL,
+            messages=messages
+        )
+        return {"reply": final_response.choices[0].message.content}
+
+    return {"reply": response_message.content}
+
+@app.post("/auth/login")
+async def login(data: dict):
+    return {"token": "local-token", "username": data["username"]}
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8000)
