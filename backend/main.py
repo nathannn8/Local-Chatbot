@@ -35,7 +35,8 @@ class MCPManager:
         self.transports = {}
         self.configs = {
             "rag": StdioServerParameters(command="py", args=["rag_server.py"]),
-            "tavily": StdioServerParameters(command="py", args=["tavily_search.py"])
+            "tavily": StdioServerParameters(command="py", args=["tavily_search.py"]),
+            "excel": StdioServerParameters(command="py", args=["excel_server.py"])
         }
 
     async def initialize(self):
@@ -69,6 +70,8 @@ class MCPManager:
             return await self.sessions["rag"].call_tool(tool_name, arguments)
         elif tool_name == "web_search":
             return await self.sessions["tavily"].call_tool(tool_name, arguments)
+        elif tool_name == "execute_excel_query":  # ← missing!
+            return await self.sessions["excel"].call_tool(tool_name, arguments)
         raise ValueError(f"Tool {tool_name} not found")
 
 mcp_manager = MCPManager()
@@ -120,10 +123,19 @@ async def chat(request: ChatRequest):
         {
             "role": "system",
             "content": (
-                "You are an AI with access to a document RAG server and a web search tool. "
-                "1. Always use document_search if the user asks about their files or uploaded documents. "
-                "2. Use web_search for current events or general knowledge. "
-                "3. If one tool fails to provide an answer, try the other."
+                    "You are an AI assistant with access to these tools: "
+                    "document_search, web_search, and execute_excel_query. "
+                    "IMPORTANT: When the user mentions any .xlsx or .xls file, "
+                    "you MUST call execute_excel_query with the filename and "
+                    "pandas code to answer the question. "
+                    "Example: if asked 'total revenue in sales_data.xlsx', call "
+                    "execute_excel_query with filename='sales_data.xlsx' and "
+                    "code='df = pd.read_excel(filename); result = df[\"Revenue\"].sum()'. "
+                    "NEVER say you cannot access files. Always use the tool."
+                    "When the user asks about ANY .xlsx or .xls file, "
+                    "you MUST ALWAYS use execute_excel_query. "
+                    "NEVER use web_search for Excel file questions. "
+                    "Excel files are local files, not on the web."
             )
         },
         {"role": "user", "content": request.message}
@@ -166,6 +178,15 @@ async def chat(request: ChatRequest):
         return {"reply": final_response.choices[0].message.content}
 
     return {"reply": response_message.content}
+
+@app.post("/upload/excel")
+async def upload_excel(file: UploadFile = File(...)):
+    uploads_dir = os.path.join(os.path.dirname(__file__), "uploads")
+    os.makedirs(uploads_dir, exist_ok=True)
+    file_path = os.path.join(uploads_dir, file.filename)
+    with open(file_path, "wb") as f:
+        shutil.copyfileobj(file.file, f)
+    return {"status": "success", "filename": file.filename}
 
 @app.post("/auth/login")
 async def login(data: dict):

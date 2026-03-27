@@ -39,3 +39,17 @@ export async function uploadPdf(file, token) {
   if (!res.ok) throw new Error('Upload failed');
   return res.json();
 }
+
+export async function uploadExcel(file, token) {
+  const formData = new FormData();
+  formData.append('file', file);
+  const res = await fetch(`${API_BASE}/upload/excel`, {
+    method: 'POST',
+    headers: {
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+    body: formData,
+  });
+  if (!res.ok) throw new Error('Upload failed');
+  return res.json();
+}
