@@ -336,6 +336,16 @@ body {
   color: var(--text-primary);
 }
 
+.excel-upload-btn {
+  border-color: rgba(46, 204, 113, 0.4);
+  color: #2ecc71;
+}
+
+.excel-upload-btn:hover {
+  border-color: #2ecc71;
+  color: #fff;
+}
+
 .pdf-upload-btn.uploading {
   pointer-events: none;
   opacity: 0.6;
@@ -368,9 +378,14 @@ body {
 }
 
 /* PDF List */
-.pdf-list-section {
+.sidebar-lists {
   flex: 1;
   overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+}
+
+.pdf-list-section {
   padding: 12px 14px;
 }
 
@@ -406,6 +421,18 @@ body {
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
+}
+
+.excel-icon {
+  background: rgba(46, 204, 113, 0.12);
+  color: #2ecc71;
+}
+
+.no-pdfs {
+  padding: 8px 12px;
+  font-size: 12px;
+  color: var(--text-muted);
+  line-height: 1.5;
 }
 
 .pdf-name {

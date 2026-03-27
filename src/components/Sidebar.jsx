@@ -1,12 +1,14 @@
 import { useRef, useState } from 'react';
 import { useAuth } from '../context/AuthContext';
-import { uploadPdf } from '../api';
-import { Upload, FileText, X, LogOut, Loader2, CheckCircle2, AlertCircle } from 'lucide-react';
+import { uploadPdf, uploadExcel } from '../api';
+import { Upload, FileText, FileSpreadsheet, X, LogOut, Loader2, CheckCircle2, AlertCircle } from 'lucide-react';
 
-export default function Sidebar({ pdfs, setPdfs }) {
+export default function Sidebar({ pdfs, setPdfs, excels, setExcels }) {
   const { user, logout } = useAuth();
-  const fileRef = useRef(null);
-  const [uploading, setUploading] = useState(false);
+  const pdfFileRef = useRef(null);
+  const excelFileRef = useRef(null);
+  const [uploadingPdf, setUploadingPdf] = useState(false);
+  const [uploadingExcel, setUploadingExcel] = useState(false);
   const [toast, setToast] = useState(null); // { type: 'success' | 'error', text }
 
   const initials = user?.username
@@ -18,11 +20,11 @@ export default function Sidebar({ pdfs, setPdfs }) {
     setTimeout(() => setToast(null), 3000);
   };
 
-  const handleFileChange = async (e) => {
+  const handlePdfChange = async (e) => {
     const file = e.target.files?.[0];
     if (!file || file.type !== 'application/pdf') return;
 
-    setUploading(true);
+    setUploadingPdf(true);
     let uploadSuccess = false;
 
     try {
@@ -48,11 +50,47 @@ export default function Sidebar({ pdfs, setPdfs }) {
       showToast('error', 'Upload failed — file saved locally only');
     }
 
-    setUploading(false);
-    if (fileRef.current) fileRef.current.value = '';
+    setUploadingPdf(false);
+    if (pdfFileRef.current) pdfFileRef.current.value = '';
+  };
+
+  const handleExcelChange = async (e) => {
+    const file = e.target.files?.[0];
+    const isExcel = file?.name.endsWith('.xlsx') || file?.name.endsWith('.xls');
+    if (!file || !isExcel) return;
+
+    setUploadingExcel(true);
+    let uploadSuccess = false;
+
+    try {
+      await uploadExcel(file, user?.token);
+      uploadSuccess = true;
+    } catch {
+      uploadSuccess = false;
+    }
+
+    setExcels((prev) => [
+      ...prev,
+      {
+        id: Date.now(),
+        name: file.name,
+        size: (file.size / 1024).toFixed(1) + ' KB',
+        addedAt: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      },
+    ]);
+
+    if (uploadSuccess) {
+      showToast('success', `Excel file uploaded!`);
+    } else {
+      showToast('error', 'Excel upload failed');
+    }
+
+    setUploadingExcel(false);
+    if (excelFileRef.current) excelFileRef.current.value = '';
   };
 
   const removePdf = (id) => setPdfs((prev) => prev.filter((p) => p.id !== id));
+  const removeExcel = (id) => setExcels((prev) => prev.filter((e) => e.id !== id));
 
   return (
     <aside className="sidebar">
@@ -71,22 +109,42 @@ export default function Sidebar({ pdfs, setPdfs }) {
       {/* Upload */}
       <div className="pdf-upload-section">
         <input
-          ref={fileRef}
+          ref={pdfFileRef}
           type="file"
           accept="application/pdf"
           hidden
-          onChange={handleFileChange}
+          onChange={handlePdfChange}
         />
         <button
-          className={`pdf-upload-btn${uploading ? ' uploading' : ''}`}
-          onClick={() => fileRef.current?.click()}
+          className={`pdf-upload-btn${uploadingPdf ? ' uploading' : ''}`}
+          onClick={() => pdfFileRef.current?.click()}
         >
-          {uploading ? (
+          {uploadingPdf ? (
             <Loader2 size={16} className="spin" />
           ) : (
             <Upload size={16} />
           )}
-          {uploading ? 'Uploading…' : 'Upload PDF'}
+          {uploadingPdf ? 'Uploading PDF…' : 'Upload PDF'}
+        </button>
+
+        <input
+          ref={excelFileRef}
+          type="file"
+          accept=".xlsx, .xls"
+          hidden
+          onChange={handleExcelChange}
+        />
+        <button
+          className={`pdf-upload-btn excel-upload-btn${uploadingExcel ? ' uploading' : ''}`}
+          style={{ marginTop: '8px' }}
+          onClick={() => excelFileRef.current?.click()}
+        >
+          {uploadingExcel ? (
+            <Loader2 size={16} className="spin" />
+          ) : (
+            <Upload size={16} />
+          )}
+          {uploadingExcel ? 'Uploading Excel…' : 'Upload Excel'}
         </button>
 
         {/* Toast notification */}
@@ -98,30 +156,57 @@ export default function Sidebar({ pdfs, setPdfs }) {
         )}
       </div>
 
-      {/* PDF List */}
-      <div className="pdf-list-section">
-        <div className="section-title">Documents ({pdfs.length})</div>
-        {pdfs.length === 0 ? (
-          <div className="no-pdfs">
-            No documents uploaded yet.<br />
-            Upload a PDF to provide context to the AI.
-          </div>
-        ) : (
-          pdfs.map((pdf) => (
-            <div key={pdf.id} className="pdf-item">
-              <div className="pdf-icon">
-                <FileText size={16} />
-              </div>
-              <div className="pdf-name">
-                <span>{pdf.name}</span>
-                <small>{pdf.size} · {pdf.addedAt}</small>
-              </div>
-              <button className="pdf-remove" onClick={() => removePdf(pdf.id)}>
-                <X size={14} />
-              </button>
+      {/* Scrollable Container for Lists */}
+      <div className="sidebar-lists">
+        {/* PDF List */}
+        <div className="pdf-list-section">
+          <div className="section-title">Documents ({pdfs.length})</div>
+          {pdfs.length === 0 ? (
+            <div className="no-pdfs">
+              No documents yet.
             </div>
-          ))
-        )}
+          ) : (
+            pdfs.map((pdf) => (
+              <div key={pdf.id} className="pdf-item">
+                <div className="pdf-icon">
+                  <FileText size={16} />
+                </div>
+                <div className="pdf-name">
+                  <span>{pdf.name}</span>
+                  <small>{pdf.size} · {pdf.addedAt}</small>
+                </div>
+                <button className="pdf-remove" onClick={() => removePdf(pdf.id)}>
+                  <X size={14} />
+                </button>
+              </div>
+            ))
+          )}
+        </div>
+
+        {/* Excel List */}
+        <div className="pdf-list-section excel-list-section">
+          <div className="section-title">Excel Files ({excels.length})</div>
+          {excels.length === 0 ? (
+            <div className="no-pdfs">
+              No spreadsheets yet.
+            </div>
+          ) : (
+            excels.map((excel) => (
+              <div key={excel.id} className="pdf-item excel-item">
+                <div className="pdf-icon excel-icon">
+                  <FileSpreadsheet size={16} />
+                </div>
+                <div className="pdf-name">
+                  <span>{excel.name}</span>
+                  <small>{excel.size} · {excel.addedAt}</small>
+                </div>
+                <button className="pdf-remove" onClick={() => removeExcel(excel.id)}>
+                  <X size={14} />
+                </button>
+              </div>
+            ))
+          )}
+        </div>
       </div>
 
       {/* Logout */}

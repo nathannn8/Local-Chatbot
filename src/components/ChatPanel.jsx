@@ -29,6 +29,17 @@ export default function ChatPanel() {
     }, 100);
   }, [messages, isTyping]);
 
+  const cleanReply = (text) => {
+    if (!text || typeof text !== 'string') return text;
+    // Strip TOOLCALL>[...] or similar patterns
+    let cleaned = text.replace(/TOOLCALL>\[.*?\]/gs, '');
+    // Strip common XML tool tags if any
+    cleaned = cleaned.replace(/<tool_call>.*?<\/tool_call>/gs, '');
+    cleaned = cleaned.replace(/<thought>.*?<\/thought>/gs, '');
+    cleaned = cleaned.replace(/<tool_result>.*?<\/tool_result>/gs, '');
+    return cleaned.trim();
+  };
+
   const handleSend = async () => {
     const text = input.trim();
     if (!text || isTyping) return;
@@ -48,10 +59,14 @@ export default function ChatPanel() {
       const data = await sendMessage(text, user?.token);
       if (!isMounted.current) return;
       
+      // Prioritize the 'reply' field as requested
+      const rawContent = data.reply || data.response || data.message || "";
+      const cleanedContent = cleanReply(rawContent);
+
       const aiMsg = {
         id: Date.now() + 1,
         role: 'ai',
-        content: data.reply || data.response || data.message || data.answer || JSON.stringify(data),
+        content: cleanedContent || "The AI provided an empty response.",
         time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       };
       setMessages((prev) => [...prev, aiMsg]);
@@ -61,7 +76,7 @@ export default function ChatPanel() {
       const errMsg = {
         id: Date.now() + 1,
         role: 'ai',
-        content: `Connection error: ${err.message || "Could not reach localhost:8000"}`,
+        content: `Error: ${err.message || "Failed to get AI response"}`,
         time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       };
       setMessages((prev) => [...prev, errMsg]);
