@@ -57,16 +57,18 @@ export default function ChatPanel() {
 
     try {
       const data = await sendMessage(text, user?.token);
+      console.log('AI Response Data:', data);
+      
       if (!isMounted.current) return;
       
       // Prioritize the 'reply' field as requested
-      const rawContent = data.reply || data.response || data.message || "";
+      const rawContent = data && data.reply ? data.reply : (data && (data.response || data.message)) || "";
       const cleanedContent = cleanReply(rawContent);
 
       const aiMsg = {
         id: Date.now() + 1,
         role: 'ai',
-        content: cleanedContent || "The AI provided an empty response.",
+        content: cleanedContent || "The AI could not provide a specific answer at this time.",
         time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       };
       setMessages((prev) => [...prev, aiMsg]);
