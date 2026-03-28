@@ -5,13 +5,13 @@ import shutil
 from typing import List, Dict
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, UploadFile, File, HTTPException
+from fastapi import FastAPI, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from dotenv import load_dotenv
 
 from docling.document_converter import DocumentConverter
-from openai import OpenAI
+from groq import Groq
 import ollama
 import chromadb
 from mcp import ClientSession, StdioServerParameters
@@ -22,12 +22,10 @@ load_dotenv()
 db_client = chromadb.PersistentClient(path="./chromadb")
 collection = db_client.get_or_create_collection(name="documents")
 
-router_client = OpenAI(
-    base_url="https://openrouter.ai/api/v1",
-    api_key=os.getenv("OPENROUTER_API_KEY")
-)
+groq_client = Groq(api_key=os.getenv("GROQ_API_KEY"))
 
-MODEL = "openrouter/free"
+EXCEL_MODEL = "llama-3.3-70b-versatile"
+GENERAL_MODEL = "openai/gpt-oss-120b"
 
 class MCPManager:
     def __init__(self):
@@ -60,7 +58,11 @@ class MCPManager:
                     "function": {
                         "name": t.name,
                         "description": t.description,
-                        "parameters": t.inputSchema
+                        "parameters": {
+                            "type": "object",
+                            "properties": t.inputSchema.get("properties", {}),
+                            "required": t.inputSchema.get("required", [])
+                        }
                     }
                 })
         return all_tools
@@ -70,7 +72,7 @@ class MCPManager:
             return await self.sessions["rag"].call_tool(tool_name, arguments)
         elif tool_name == "web_search":
             return await self.sessions["tavily"].call_tool(tool_name, arguments)
-        elif tool_name == "execute_excel_query":  # ← missing!
+        elif tool_name == "execute_excel_query":
             return await self.sessions["excel"].call_tool(tool_name, arguments)
         raise ValueError(f"Tool {tool_name} not found")
 
@@ -93,6 +95,73 @@ app.add_middleware(
 
 class ChatRequest(BaseModel):
     message: str
+
+def is_excel_query(message: str) -> bool:
+    return any(x in message.lower() for x in [".xlsx", ".xls", "excel", "spreadsheet"])
+
+async def handle_excel_query(message: str, tools: List[Dict]) -> str:
+    excel_tool = [t for t in tools if t["function"]["name"] == "execute_excel_query"]
+    messages = [
+        {
+            "role": "system",
+            "content": (
+                "You are an Excel data analyst. Use execute_excel_query to analyze Excel files. "
+                "The file columns are: Month, Product, Revenue, Units Sold, Region. "
+                "ALWAYS use this exact code pattern for revenue by month: "
+                "df = pd.read_excel(filename); result = df.groupby('Month')['Revenue'].sum().to_dict() "
+                "Store answer in 'result' variable. Never describe what to do, just call the tool."
+            )
+        },
+        {"role": "user", "content": message}
+    ]
+
+    response = groq_client.chat.completions.create(
+        model=EXCEL_MODEL,
+        messages=messages,
+        tools=excel_tool,
+        tool_choice="auto"
+    )
+
+    response_message = response.choices[0].message
+
+    if response_message.tool_calls:
+        messages.append(response_message)
+        result_text = ""
+        for tool_call in response_message.tool_calls:
+            try:
+                tool_args = json.loads(tool_call.function.arguments)
+                tool_result = await mcp_manager.call_tool(tool_call.function.name, tool_args)
+                result_text = tool_result.content[0].text
+                messages.append({
+                    "role": "tool",
+                    "tool_call_id": tool_call.id,
+                    "name": tool_call.function.name,
+                    "content": result_text
+                })
+            except Exception as e:
+                result_text = f"Error: {str(e)}"
+                messages.append({
+                    "role": "tool",
+                    "tool_call_id": tool_call.id,
+                    "name": tool_call.function.name,
+                    "content": result_text
+                })
+
+        # now add the follow-up after tool result is available
+        messages.append({
+            "role": "user",
+            "content": f"The tool returned: {result_text}. Give me a clear natural language answer."
+        })
+
+        final = groq_client.chat.completions.create(
+            model=EXCEL_MODEL,
+            messages=messages,
+            tools=excel_tool,
+            tool_choice="none"
+        )
+        return final.choices[0].message.content or "Could not generate summary."
+
+    return response_message.content or "No response generated."
 
 @app.post("/upload")
 async def upload_pdf(file: UploadFile = File(...)):
@@ -119,32 +188,29 @@ async def upload_pdf(file: UploadFile = File(...)):
 @app.post("/chat")
 async def chat(request: ChatRequest):
     tools = await mcp_manager.get_tools_metadata()
+
+    if is_excel_query(request.message):
+        reply = await handle_excel_query(request.message, tools)
+        return {"reply": reply}
+
+    general_tools = [t for t in tools if t["function"]["name"] != "execute_excel_query"]
     messages = [
         {
             "role": "system",
             "content": (
-                    "You are an AI assistant with access to these tools: "
-                    "document_search, web_search, and execute_excel_query. "
-                    "IMPORTANT: When the user mentions any .xlsx or .xls file, "
-                    "you MUST call execute_excel_query with the filename and "
-                    "pandas code to answer the question. "
-                    "Example: if asked 'total revenue in sales_data.xlsx', call "
-                    "execute_excel_query with filename='sales_data.xlsx' and "
-                    "code='df = pd.read_excel(filename); result = df[\"Revenue\"].sum()'. "
-                    "NEVER say you cannot access files. Always use the tool."
-                    "When the user asks about ANY .xlsx or .xls file, "
-                    "you MUST ALWAYS use execute_excel_query. "
-                    "NEVER use web_search for Excel file questions. "
-                    "Excel files are local files, not on the web."
+                "You are a helpful AI assistant with access to two tools: "
+                "1. document_search - search uploaded PDF documents "
+                "2. web_search - search the web for current information. "
+                "Use the right tool for each question."
             )
         },
         {"role": "user", "content": request.message}
     ]
 
-    response = router_client.chat.completions.create(
-        model=MODEL,
+    response = groq_client.chat.completions.create(
+        model=GENERAL_MODEL,
         messages=messages,
-        tools=tools,
+        tools=general_tools,
         tool_choice="auto"
     )
 
@@ -168,16 +234,20 @@ async def chat(request: ChatRequest):
                     "role": "tool",
                     "tool_call_id": tool_call.id,
                     "name": tool_call.function.name,
-                    "content": f"Error executing tool: {str(e)}"
+                    "content": f"Error: {str(e)}"
                 })
 
-        final_response = router_client.chat.completions.create(
-            model=MODEL,
-            messages=messages
+        final_response = groq_client.chat.completions.create(
+            model=GENERAL_MODEL,
+            messages=messages,
+            tools=general_tools,
+            tool_choice="none"
         )
-        return {"reply": final_response.choices[0].message.content}
+        reply = final_response.choices[0].message.content
+        return {"reply": reply if reply else "Tool ran but no summary generated."}
 
-    return {"reply": response_message.content}
+    reply = response_message.content
+    return {"reply": reply if reply else "No response generated. Please try again."}
 
 @app.post("/upload/excel")
 async def upload_excel(file: UploadFile = File(...)):
