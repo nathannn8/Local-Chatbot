@@ -4,6 +4,99 @@ import { sendMessage } from '../api';
 import { Send, Bot, MessageSquare } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import {
+  PieChart,
+  Pie,
+  Cell,
+  BarChart,
+  Bar,
+  LineChart,
+  Line,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  Legend,
+  ResponsiveContainer
+} from 'recharts';
+
+const COLORS = ['#6c5ce7', '#a29bfe', '#81ecec', '#74b9ff', '#55efc4', '#dfe6e9'];
+
+const ChartRenderer = ({ data }) => {
+  if (!data) return null;
+  const { chart_type, labels, values, title } = data;
+  
+  if (!labels || !values) return null;
+
+  const chartData = labels.map((label, index) => ({
+    name: label,
+    value: values[index]
+  }));
+
+  const CustomTooltip = ({ active, payload, label }) => {
+    if (active && payload && payload.length) {
+      return (
+        <div style={{ background: '#22222f', border: '1px solid rgba(255,255,255,0.1)', padding: '10px', borderRadius: '8px', zIndex: 1000 }}>
+          <p style={{ margin: 0, color: '#e8e8f0', fontSize: '13px' }}>{`${payload[0].name || label}: ${payload[0].value}`}</p>
+        </div>
+      );
+    }
+    return null;
+  };
+
+  const renderTitle = () => {
+    if (!title) return null;
+    return (
+      <div style={{ textAlign: 'center', marginBottom: '16px', fontWeight: '600', color: '#e8e8f0' }}>
+        {title}
+      </div>
+    );
+  };
+
+  return (
+    <div style={{ width: '100%', height: 300, marginTop: '20px' }}>
+      {renderTitle()}
+      <ResponsiveContainer width="100%" height="80%">
+        {chart_type === 'pie' ? (
+          <PieChart>
+            <Pie
+              data={chartData}
+              cx="50%"
+              cy="50%"
+              labelLine={false}
+              outerRadius={80}
+              fill="#8884d8"
+              dataKey="value"
+              label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
+            >
+              {chartData.map((entry, index) => (
+                <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+              ))}
+            </Pie>
+            <Tooltip content={<CustomTooltip />} />
+            <Legend />
+          </PieChart>
+        ) : chart_type === 'bar' ? (
+          <BarChart data={chartData}>
+            <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.1)" />
+            <XAxis dataKey="name" stroke="#9898b0" fontSize={12} tickLine={false} axisLine={false} />
+            <YAxis stroke="#9898b0" fontSize={12} tickLine={false} axisLine={false} />
+            <Tooltip content={<CustomTooltip />} cursor={{fill: 'rgba(255,255,255,0.05)'}} />
+            <Bar dataKey="value" fill="#6c5ce7" radius={[4, 4, 0, 0]} />
+          </BarChart>
+        ) : chart_type === 'line' ? (
+          <LineChart data={chartData}>
+            <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.1)" />
+            <XAxis dataKey="name" stroke="#9898b0" fontSize={12} tickLine={false} axisLine={false} />
+            <YAxis stroke="#9898b0" fontSize={12} tickLine={false} axisLine={false} />
+            <Tooltip content={<CustomTooltip />} />
+            <Line type="monotone" dataKey="value" stroke="#6c5ce7" strokeWidth={3} dot={{ r: 4, fill: '#a29bfe' }} activeDot={{ r: 6 }} />
+          </LineChart>
+        ) : null}
+      </ResponsiveContainer>
+    </div>
+  );
+};
 
 export default function ChatPanel() {
   const { user } = useAuth();
@@ -88,6 +181,7 @@ export default function ChatPanel() {
         id: Date.now() + 1,
         role: 'ai',
         content: cleanedContent || "The AI could not provide a specific answer at this time.",
+        chart: data?.chart || null,
         time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       };
       setMessages((prev) => [...prev, aiMsg]);
@@ -155,6 +249,7 @@ export default function ChatPanel() {
                     <ReactMarkdown remarkPlugins={[remarkGfm]}>
                       {String(msg.content || '')}
                     </ReactMarkdown>
+                    {msg.chart && <ChartRenderer data={msg.chart} />}
                   </div>
                 ) : (
                   msg.content
