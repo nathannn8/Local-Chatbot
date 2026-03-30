@@ -708,6 +708,37 @@ body {
   border-color: var(--accent-secondary);
 }
 
+/* Markdown Tables */
+.md-content table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 16px 0;
+  display: block;
+  overflow-x: auto;
+  border-radius: 4px;
+}
+
+.md-content th,
+.md-content td {
+  padding: 10px 14px;
+  border: 1px solid var(--border-default);
+  text-align: left;
+}
+
+.md-content th {
+  background: rgba(255, 255, 255, 0.06);
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.md-content tr:nth-child(even) {
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.md-content tr:hover {
+  background: rgba(255, 255, 255, 0.04);
+}
+
 .msg-time {
   font-size: 11px;
   color: var(--text-muted);

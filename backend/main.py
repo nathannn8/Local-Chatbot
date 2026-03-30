@@ -237,11 +237,15 @@ async def chat(request: ChatRequest):
                     "content": f"Error: {str(e)}"
                 })
 
+        # add instruction to just summarize
+        messages.append({
+            "role": "user",
+            "content": "Based on the search results above, give me a clear and well formatted answer."
+        })
+
         final_response = groq_client.chat.completions.create(
             model=GENERAL_MODEL,
-            messages=messages,
-            tools=general_tools,
-            tool_choice="none"
+            messages=messages
         )
         reply = final_response.choices[0].message.content
         return {"reply": reply if reply else "Tool ran but no summary generated."}
