@@ -3,6 +3,7 @@ import { useAuth } from '../context/AuthContext';
 import { sendMessage } from '../api';
 import { Send, Bot, MessageSquare } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 
 export default function ChatPanel() {
   const { user } = useAuth();
@@ -37,7 +38,25 @@ export default function ChatPanel() {
     cleaned = cleaned.replace(/<tool_call>.*?<\/tool_call>/gs, '');
     cleaned = cleaned.replace(/<thought>.*?<\/thought>/gs, '');
     cleaned = cleaned.replace(/<tool_result>.*?<\/tool_result>/gs, '');
-    return cleaned.trim();
+    // Ensure blank lines before tables to prevent paragraphs from being merged into table headers
+    const lines = cleaned.split('\n');
+    let formatted = [];
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      const isTableLine = line.trim().startsWith('|');
+      const prevLine = i > 0 ? lines[i - 1].trim() : '';
+      const prevIsTable = prevLine.startsWith('|');
+
+      // If current line starts a table, but previous line wasn't empty or a table, insert a blank line
+      if (isTableLine && !prevIsTable && prevLine !== '') {
+        formatted.push('');
+      }
+      // If we are strictly enforcing that only lines starting with '|' render as tables,
+      // we could manipulate lines here, but the blank line fix prevents 99% of paragraph merging issues.
+      formatted.push(line);
+    }
+    
+    return formatted.join('\n').trim();
   };
 
   const handleSend = async () => {
@@ -133,7 +152,7 @@ export default function ChatPanel() {
               <div className="msg-bubble">
                 {msg.role === 'ai' ? (
                   <div className="md-content">
-                    <ReactMarkdown>
+                    <ReactMarkdown remarkPlugins={[remarkGfm]}>
                       {String(msg.content || '')}
                     </ReactMarkdown>
                   </div>
