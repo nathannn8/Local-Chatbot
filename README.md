@@ -3,7 +3,7 @@
 A local AI chat interface with RAG and web search capabilities.
 
 ## Features
-- Chat with a local LLM (llama3.2 via Ollama)
+- Chat with a Groq LLM
 - Upload PDFs and query them using RAG
 - Web search via Tavily
 - Authentication system
@@ -11,7 +11,7 @@ A local AI chat interface with RAG and web search capabilities.
 ## Tech Stack
 - Frontend: React + Vite
 - Backend: FastAPI
-- LLM: Ollama (llama3.2:1b)
+- LLM: Groq API
 - Embeddings: nomic-embed-text
 - Vector DB: ChromaDB
 - PDF Parsing: Docling
@@ -33,5 +33,5 @@ npm run dev
 ```
 
 ### Requirements
-- Ollama installed with llama3.2:1b and nomic-embed-text pulled
+- Groq API and nomic-embed-text pulled
 - Tavily API key in backend/.env
