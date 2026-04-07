@@ -1,6 +1,6 @@
 # LocalChat AI
 
-A local AI chat interface with RAG and web search capabilities.
+An AI chat interface with RAG and web search capabilities.
 
 ## Features
 - Chat with a Groq LLM
