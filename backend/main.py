@@ -132,7 +132,7 @@ async def handle_excel_query(message: str, tools: List[Dict]) -> dict:
         tool_result = await mcp_manager.call_tool(tool_call.function.name, tool_args)
         result_text = tool_result.content[0].text
 
-        # --- CRITICAL FIX START ---
+
         # Check if the tool output looks like a chart dictionary
         if "chart_type" in result_text:
             try:
@@ -146,7 +146,7 @@ async def handle_excel_query(message: str, tools: List[Dict]) -> dict:
                     }
             except Exception as e:
                 print(f"Parsing error: {e}")
-        # --- CRITICAL FIX END ---
+
 
         # If not a chart, provide natural language summary
         messages.append(response_message)
