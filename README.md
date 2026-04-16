@@ -1,11 +1,13 @@
 # LocalChat AI
 
-An AI chat interface with RAG and web search capabilities.
+An AI chat interface with RAG and multiple tools.
 
 ## Features
 - Chat with a Groq LLM
 - Upload PDFs and query them using RAG
 - Web search via Tavily
+- Excel data parser
+- Chart maker
 - Authentication system
 
 ## Tech Stack
